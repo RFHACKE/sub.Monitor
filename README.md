@@ -28,13 +28,22 @@ Why opt for sub.Monitor? This program offers easy setup due to its utilization o
 
 ```console
 options:
-  --add ADD    Domain to scan
-  --file FILE  File with known subdomains
-  -d D         Domain to scan
-  -h A         Hours between scans
-  --dump       Dump all subdomains for a specific domain
-  --list       List all root domains in the database
-  -help, -?    Show this help message and exit
+  --add ADD             Domain to scan
+  --out-scope OUT_SCOPE
+                        File with out-of-scope domains
+  --file FILE           File with known subdomains
+  -D DOMAIN, --domain DOMAIN
+                        Domain to scan
+  -H HOURS, --hours HOURS
+                        Hours between scans
+  --dump                Dump all subdomains for a specific domain
+  --list                List all root domains in the database
+  -df DF                File with domains to scan
+  --inscope             Dump only in-scope domains
+  --notinscope          Dump only out-of-scope domains
+  --dumpall             Dump all subdomains with their details
+  --info                Show discovery date for subdomains
+  -help, -?             Show this help message and exit
   ````
   
   ## Previous needed configurations
@@ -66,6 +75,15 @@ def run_tool(tool, domain, output_file):
     elif tool == 'my-custom-tool':
         my-custom-tool-binary = config.get('Binary paths', 'my-custom-tool-binary-or-script')
         cmd = f'{my-custom-tool-binary} -d {domain}'
+````
+
+It's important to note that if you add any custom tool, the last output must be the domain results in order to sub.Monitor save them on the database, for example the way of using it would be:
+
+````bash
+cmd = f'bash customtool.sh {domain}''
+...
+cat customtool.sh
+mycustomtool -d $1 > /tmp/$1.txt &>/dev/null; cat /tmp/$1.txt | unfurl domains | anew; rm -r /tmp/$1.txt
 ````
 
 Also add your tool name here:
@@ -108,6 +126,40 @@ python3 monitor.py --add ibm.com --file ibm_sorted_subdomains.txt
 [2023-06-06 18:16:26.002521] - 538 subdomains were added to the local database.
 ````
 
+Also there is a possibility to add an out-of-scope flag, for example, let's say that a Bug Bounty program has the following policy:
+
+````console
+*.ibm.com - in scope
+super-admin.ibm.com - out of scope
+*.super-admin.ibm.com - out of scope
+````
+
+It is possible to create a file with this stuff:
+
+````console
+cat outscope.txt
+super-admin.ibm.com
+*.super-admin.ibm.com
+````
+
+Now, you can add manually all your discovered domains to the database (filtering the ones that are in scope):
+
+````console
+python3 monitor.py --add ibm.com --file ibm_sorted_subdomains.txt --out-scope outscope.txt
+          _    ___  ___            _ _
+          | |   |  \/  |           (_) |
+ ___ _   _| |__ | .  . | ___  _ __  _| |_ ___  _ __
+/ __| | | | '_ \| |\/| |/ _ \| '_ \| | __/ _ \| '__|
+\__ \ |_| | |_) | |  | | (_) | | | | | || (_) | |
+|___/\__,_|_.__/\_|  |_/\___/|_| |_|_|\__\___/|_|
+
+                    github.com/e1abrador/sub.Monitor
+
+[2023-06-06 18:16:26.002521] - 538 subdomains were added to the local database.
+````
+
+This will add all your subdomains to the database, but it will mark all the ones that are out of scope with the flag ``[Out of scope]`` (we will see how to filter in-scope domains from the database on dumping domains section).
+
 To confirm that the domain has been added to the database, execute:
 
 ```console
@@ -128,13 +180,14 @@ ibm.com [9 subdomains added manually] [2 subdomains discovered] [11 total unique
 Once it has been correctly loaded, the monitoring process can start. It is recommended to use TMUX in a VPS and leave it running for a long time. With the following command, the script will be running the subdomain enumeration tools and will compare the new results with the old results. If there's any new subdomain found, sub.Monitor will first add it to the local database (so it will not notify anymore about that discovery) and then will notify the user via slack/telegram/discord.
 
 ````console
-python3 monitor.py -d ibm.com -h 8
+python3 monitor.py -D ibm.com -H 12 --out-scope outscope.txt
 ````
 
 If any subdomain is found, sub.Monitor will show the following message on the output:
 
 ````console
-➜ python3 monitor.py -d ibm.com -h 12
+➜ python3 monitor.py -D ibm.com -H 8 # To filter the subdomains that are in the current scope from the out-scope ones, you can use:
+                                      # python3 monitor.py -D ibm.com -H 8 --out-scope outscope.txt
 
           _    ___  ___            _ _
           | |   |  \/  |           (_) |
@@ -153,7 +206,8 @@ If any subdomain is found, sub.Monitor will show the following message on the ou
 It is also possible to monitor more than 1 domain, with the following command:
 
 ````console
-python3 monitor.py -df root-domains.txt -h 8
+python3 monitor.py -df root-domains.txt -H 8
+python3 monitor.py -df roots.txt -H 8 --out-scope outscope.txt
 ````
 
 After those messages are reported, on the same time the user will receive the notifications on telegram
@@ -191,7 +245,7 @@ I recommend doing this for each domain (it may be pretty tedious to set up this 
 Let's say that the script has been running for 2 months and you want to get all the results (old subdomains and newly discovered ones). With sub.Monitor whether it is possible using the --dump flag:
 
 ````console
-python3 monitor.py -d ibm.com --dump
+python3 monitor.py -D ibm.com --dump
 
           _    ___  ___            _ _
           | |   |  \/  |           (_) |
@@ -211,7 +265,7 @@ subdomain2.ibm.com
 You can also use the following command to see the day on which the domain was discovered:
 
 ````console
-python3 monitor.py -d ibm.com --dump --info
+python3 monitor.py -D ibm.com --dump --info
 
           _    ___  ___            _ _
           | |   |  \/  |           (_) |
@@ -224,7 +278,26 @@ python3 monitor.py -d ibm.com --dump --info
 
 Subdomains for ibm.com:
 test.ibm.com [discovered on 06/08/2023]
-test2.ibm.com [discovered on 08/08/2023]
+test2.ibm.com [discovered on 08/08/2023] [Out of scope]
+````
+
+As it's highly probable that some domains are marked as out of scope using ``python3 monitor.py -d ibm.com --dump --info`` command, in order to show only the domains in-scope it is possible to use ``--inscope`` flag:
+
+````console
+python3 monitor.py -D ibm.com --dump --info --inscope
+
+          _    ___  ___            _ _
+          | |   |  \/  |           (_) |
+ ___ _   _| |__ | .  . | ___  _ __  _| |_ ___  _ __
+/ __| | | | '_ \| |\/| |/ _ \| '_ \| | __/ _ \| '__|
+\__ \ |_| | |_) | |  | | (_) | | | | | || (_) | |
+|___/\__,_|_.__/\_|  |_/\___/|_| |_|_|\__\___/|_|
+
+                    github.com/e1abrador/sub.Monitor
+
+Subdomains for ibm.com:
+test.ibm.com [discovered on 06/08/2023]
+test3.ibm.com [discovered on 08/08/2023]
 ````
 
   ## Thanks
@@ -239,7 +312,7 @@ test2.ibm.com [discovered on 08/08/2023]
 
 - Implement the monitoring of more than 1 subdomain. [DONE] 
 - Continuously read the domain files so new domains can be scanned without stopping the program. [DONE]
-- Implement out of scope filtering [Soon]
+- Implement out of scope filtering [DONE]
   
 If you have any idea of some new functionality open a PR at https://github.com/e1abrador/sub.Monitor/pulls.
 
@@ -248,6 +321,6 @@ If you really love the tool (or any others), or they helped you find an awesome 
 
 ⚪ e1abrador
 
-Twitter: https://twitter.com/C4yyyy
+Twitter: https://twitter.com/e1abrador
 
 <a href='https://www.buymeacoffee.com/e1abrador' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi2.png?v=3' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
